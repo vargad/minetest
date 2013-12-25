@@ -260,7 +260,27 @@ public:
 		JMutexAutoLock lock(m_mutex);
 		m_list.push_back(t);
 	}
-	T pop_front(u32 wait_time_max_ms=0)
+	T pop_front()
+	{
+		for(;;)
+		{
+			{
+				JMutexAutoLock lock(m_mutex);
+
+				if(!m_list.empty())
+				{
+					typename std::list<T>::iterator begin = m_list.begin();
+					T t = *begin;
+					m_list.erase(begin);
+					return t;
+				}
+			}
+
+			// Wait a while before trying again
+			sleep_ms(10);
+		}
+	}
+	T pop_front(u32 wait_time_max_ms)
 	{
 		u32 wait_time_ms = 0;
 
@@ -286,7 +306,28 @@ public:
 			wait_time_ms += 10;
 		}
 	}
-	T pop_back(u32 wait_time_max_ms=0)
+	T pop_back()
+	{
+		for(;;)
+		{
+			{
+				JMutexAutoLock lock(m_mutex);
+
+				if(!m_list.empty())
+				{
+					typename std::list<T>::iterator last = m_list.end();
+					last--;
+					T t = *last;
+					m_list.erase(last);
+					return t;
+				}
+			}
+
+			// Wait a while before trying again
+			sleep_ms(10);
+		}
+	}
+	T pop_back(u32 wait_time_max_ms)
 	{
 		u32 wait_time_ms = 0;
 
