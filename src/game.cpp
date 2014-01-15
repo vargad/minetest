@@ -239,6 +239,8 @@ PointedThing getPointedThing(Client *client, v3f player_position,
 	INodeDefManager *nodedef = client->getNodeDefManager();
 	ClientMap &map = client->getEnv().getClientMap();
 
+	f32 mindistance = BS * 1001;
+
 	// First try to find a pointed at active object
 	if(look_for_object)
 	{
@@ -260,16 +262,15 @@ PointedThing getPointedThing(Client *client, v3f player_position,
 						selection_box->MaxEdge + pos));
 			}
 
+			mindistance = (selected_object->getPosition() - camera_position).getLength();
 
 			result.type = POINTEDTHING_OBJECT;
 			result.object_id = selected_object->getId();
-			return result;
 		}
 	}
 
 	// That didn't work, try to find a pointed at node
 
-	f32 mindistance = BS * 1001;
 	
 	v3s16 pos_i = floatToInt(player_position, BS);
 
@@ -812,7 +813,7 @@ public:
 		services->setVertexShaderConstant("animationTimer", &animation_timer_f, 1);
 
 		LocalPlayer* player = m_client->getEnv().getLocalPlayer();
-		v3f eye_position = player->getEyePosition(); 
+		v3f eye_position = player->getEyePosition();
 		services->setPixelShaderConstant("eyePosition", (irr::f32*)&eye_position, 3);
 		services->setVertexShaderConstant("eyePosition", (irr::f32*)&eye_position, 3);
 
@@ -1479,6 +1480,11 @@ void the_game(
 
 	bool use_weather = g_settings->getBool("weather");
 
+	core::stringw str = L"Minetest [";
+	str += driver->getName();
+	str += "]";
+	device->setWindowCaption(str.c_str());
+
 	for(;;)
 	{
 		if(device->run() == false || kill == true)
@@ -1507,7 +1513,9 @@ void the_game(
 		*/
 
 		{
-			float fps_max = g_settings->getFloat("fps_max");
+			float fps_max = g_menumgr.pausesGame() ?
+					g_settings->getFloat("pause_fps_max") :
+					g_settings->getFloat("fps_max");
 			u32 frametime_min = 1000./fps_max;
 			
 			if(busytime_u32 < frametime_min)
@@ -1868,12 +1876,12 @@ void the_game(
 		}
 		else if(input->wasKeyDown(getKeySetting("keymap_screenshot")))
 		{
-			irr::video::IImage* const image = driver->createScreenShot(); 
-			if (image) { 
-				irr::c8 filename[256]; 
-				snprintf(filename, 256, "%s" DIR_DELIM "screenshot_%u.png", 
+			irr::video::IImage* const image = driver->createScreenShot();
+			if (image) {
+				irr::c8 filename[256];
+				snprintf(filename, 256, "%s" DIR_DELIM "screenshot_%u.png",
 						 g_settings->get("screenshot_path").c_str(),
-						 device->getTimer()->getRealTime()); 
+						 device->getTimer()->getRealTime());
 				if (driver->writeImageToFile(image, filename)) {
 					std::wstringstream sstr;
 					sstr<<"Saved screenshot to '"<<filename<<"'";
@@ -1883,8 +1891,8 @@ void the_game(
 				} else{
 					infostream<<"Failed to save screenshot '"<<filename<<"'"<<std::endl;
 				}
-				image->drop(); 
-			}			 
+				image->drop();
+			}
 		}
 		else if(input->wasKeyDown(getKeySetting("keymap_toggle_hud")))
 		{
@@ -2186,25 +2194,28 @@ void the_game(
 			LocalPlayer* player = client.getEnv().getLocalPlayer();
 			player->keyPressed=keyPressed;
 		}
-		
-		/*
-			Run server
-		*/
 
-		if(server != NULL)
+		/*
+			Run server, client (and process environments)
+		*/
+		bool can_be_and_is_paused =
+				(simple_singleplayer_mode && g_menumgr.pausesGame());
+		if(can_be_and_is_paused)
 		{
-			//TimeTaker timer("server->step(dtime)");
-			server->step(dtime);
+			// No time passes
+			dtime = 0;
 		}
-
-		/*
-			Process environment
-		*/
-		
+		else
 		{
-			//TimeTaker timer("client.step(dtime)");
-			client.step(dtime);
-			//client.step(dtime_avg1);
+			if(server != NULL)
+			{
+				//TimeTaker timer("server->step(dtime)");
+				server->step(dtime);
+			}
+			{
+				//TimeTaker timer("client.step(dtime)");
+				client.step(dtime);
+			}
 		}
 
 		{
@@ -2252,7 +2263,7 @@ void the_game(
 							new MainRespawnInitiator(
 									&respawn_menu_active, &client);
 					GUIDeathScreen *menu =
-							new GUIDeathScreen(guienv, guiroot, -1, 
+							new GUIDeathScreen(guienv, guiroot, -1,
 								&g_menumgr, respawner);
 					menu->drop();
 					
@@ -2310,6 +2321,7 @@ void the_game(
 						 event.spawn_particle.expirationtime,
 						 event.spawn_particle.size,
 						 event.spawn_particle.collisiondetection,
+						 event.spawn_particle.vertical,
 						 texture,
 						 v2f(0.0, 0.0),
 						 v2f(1.0, 1.0));
@@ -2334,6 +2346,7 @@ void the_game(
 						 event.add_particlespawner.minsize,
 						 event.add_particlespawner.maxsize,
 						 event.add_particlespawner.collisiondetection,
+						 event.add_particlespawner.vertical,
 						 texture,
 						 event.add_particlespawner.id);
 				}
@@ -2744,7 +2757,7 @@ void the_game(
 				
 				// Sign special case, at least until formspec is properly implemented.
 				// Deprecated?
-				if(meta && meta->getString("formspec") == "hack:sign_text_input" 
+				if(meta && meta->getString("formspec") == "hack:sign_text_input"
 						&& !random_input
 						&& !input->isKeyDown(getKeySetting("keymap_sneak")))
 				{
@@ -2990,10 +3003,13 @@ void the_game(
 			scenetime_avg = scenetime_avg * 0.95 + (float)scenetime*0.05;
 			static float endscenetime_avg = 0;
 			endscenetime_avg = endscenetime_avg * 0.95 + (float)endscenetime*0.05;*/
-			
+
+			u16 fps = (1.0/dtime_avg1);
+
 			std::ostringstream os(std::ios_base::binary);
 			os<<std::fixed
 				<<"Minetest "<<minetest_version_hash
+				<<" FPS = "<<fps
 				<<" (R: range_all="<<draw_control.range_all<<")"
 				<<std::setprecision(0)
 				<<" drawtime = "<<drawtime_avg
@@ -3208,7 +3224,7 @@ void the_game(
 
 				driver->getOverrideMaterial().Material.ColorMask = irr::video::ECP_RED;
 				driver->getOverrideMaterial().EnableFlags  = irr::video::EMF_COLOR_MASK;
-				driver->getOverrideMaterial().EnablePasses = irr::scene::ESNRP_SKY_BOX + 
+				driver->getOverrideMaterial().EnablePasses = irr::scene::ESNRP_SKY_BOX +
 															 irr::scene::ESNRP_SOLID +
 															 irr::scene::ESNRP_TRANSPARENT +
 															 irr::scene::ESNRP_TRANSPARENT_EFFECT +
@@ -3382,21 +3398,6 @@ void the_game(
 			End of drawing
 		*/
 
-		static s16 lastFPS = 0;
-		//u16 fps = driver->getFPS();
-		u16 fps = (1.0/dtime_avg1);
-
-		if (lastFPS != fps)
-		{
-			core::stringw str = L"Minetest [";
-			str += driver->getName();
-			str += "] FPS=";
-			str += fps;
-
-			device->setWindowCaption(str.c_str());
-			lastFPS = fps;
-		}
-
 		/*
 			Log times and stuff for visualization
 		*/
@@ -3433,6 +3434,16 @@ void the_game(
 
 	chat_backend.addMessage(L"", L"# Disconnected.");
 	chat_backend.addMessage(L"", L"");
+
+	client.Stop();
+
+	//force answer all texture and shader jobs (TODO return empty values)
+
+	while(!client.isShutdown()) {
+		tsrc->processQueue();
+		shsrc->processQueue();
+		sleep_ms(100);
+	}
 
 	// Client scope (client is destructed before destructing *def and tsrc)
 	}while(0);

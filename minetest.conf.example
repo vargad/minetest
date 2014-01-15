@@ -68,6 +68,8 @@
 # If FPS would go higher than this, limit it by sleeping
 # (to not waste CPU power for no benefit)
 #fps_max = 60
+# Maximum FPS when game is paused
+#pause_fps_max = 20
 # The allowed adjustment range for the automatic rendering range adjustment
 #viewing_range_nodes_max = 160
 #viewing_range_nodes_min = 35
@@ -173,9 +175,9 @@
 # Set to true enables parallax occlusion mapping. Requires shaders enabled.
 #enable_parallax_occlusion = false
 # Scale of parallax occlusion effect
-#parallax_mapping_scale = 0.08
+#parallax_occlusion_scale = 0.08
 # Bias of parallax occlusion effect, usually scale/2
-#parallax_mapping_scale = 0.04
+#parallax_occlusion_bias = 0.04
 # Set to true enables waving water. Requires shaders enabled.
 #enable_waving_water = false
 # Parameters for waving water:
@@ -279,10 +281,6 @@
 #disable_anticheat = false
 # If true, actions are recorded for rollback
 #enable_rollback_recording = false
-# If true, blocks are cached (and generated if not before) before a player is spawned.
-#cache_block_before_spawn = true
-# Defines the maximum height a player can spawn in a map, above water level
-#max_spawn_height = 50
 
 # Profiler data print interval. #0 = disable.
 #profiler_print_interval = 0
@@ -303,6 +301,8 @@
 # This is a trade-off between sqlite transaction overhead and
 # memory consumption (4096=100MB, as a rule of thumb)
 #max_clearobjects_extra_loaded_blocks = 4096
+# Maximum number of forceloaded blocks
+#max_forceloaded_blocks = 16
 # Interval of sending time of day to clients
 #time_send_interval = 5
 # Length of day/night cycle. 72=20min, 360=4min, 1=24hour, 0=day/night/whatever stays unchanged
@@ -347,7 +347,10 @@
 # Number of emerge threads to use.  Make this field blank, or increase this number, to use multiple threads.
 # On multiprocessor systems, this will improve mapgen speed greatly, at the cost of slightly buggy caves.
 #num_emerge_threads = 1
-
+# maximum number of packets sent per send step, if you have a slow connection
+# try reducing it, but don't reduce it to a number below double of targeted
+# client number
+#max_packets_per_iteration = 1024
 #
 # Physics stuff
 #

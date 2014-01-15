@@ -168,6 +168,7 @@ struct ClientEvent
 			f32 expirationtime;
 			f32 size;
 			bool collisiondetection;
+			bool vertical;
 			std::string *texture;
 		} spawn_particle;
 		struct{
@@ -184,6 +185,7 @@ struct ClientEvent
 			f32 minsize;
 			f32 maxsize;
 			bool collisiondetection;
+			bool vertical;
 			std::string *texture;
 			u32 id;
 		} add_particlespawner;
@@ -289,6 +291,14 @@ public:
 	);
 	
 	~Client();
+
+	/*
+	 request all threads managed by client to be stopped
+	 */
+	void Stop();
+
+
+	bool isShutdown();
 	/*
 		The name of the local player should already be set when
 		calling this, as it is sent in the initialization.
@@ -420,6 +430,7 @@ public:
 	virtual MtEventManager* getEventManager();
 	virtual bool checkLocalPrivilege(const std::string &priv)
 	{ return checkPrivilege(priv); }
+	virtual scene::IAnimatedMesh* getMesh(const std::string &filename);
 
 	// The following set of functions is used by ClientMediaDownloader
 	// Insert a media file appropriately into the appropriate manager
@@ -509,6 +520,9 @@ private:
 	// Detached inventories
 	// key = name
 	std::map<std::string, Inventory*> m_detached_inventories;
+
+	// Storage for mesh data for creating multiple instances of the same mesh
+	std::map<std::string, std::string> m_mesh_data;
 };
 
 #endif // !CLIENT_HEADER

@@ -77,6 +77,7 @@ void set_default_settings(Settings *settings)
 
 	settings->setDefault("wanted_fps", "30");
 	settings->setDefault("fps_max", "60");
+	settings->setDefault("pause_fps_max", "20");
 	// A bit more than the server will send around the player, to make fog blend well
 	settings->setDefault("viewing_range_nodes_max", "240");
 	settings->setDefault("viewing_range_nodes_min", "35");
@@ -171,6 +172,8 @@ void set_default_settings(Settings *settings)
 
 	// Server stuff
 	// "map-dir" doesn't exist by default.
+	settings->setDefault("workaround_window_size","5");
+	settings->setDefault("max_packets_per_iteration","1024");
 	settings->setDefault("port", "30000");
 	settings->setDefault("default_game", "minetest");
 	settings->setDefault("motd", "");
@@ -188,8 +191,6 @@ void set_default_settings(Settings *settings)
 	settings->setDefault("disallow_empty_password", "false");
 	settings->setDefault("disable_anticheat", "false");
 	settings->setDefault("enable_rollback_recording", "false");
-	settings->setDefault("cache_block_before_spawn", "true");
-	settings->setDefault("max_spawn_height", "50");
 
 	settings->setDefault("profiler_print_interval", "0");
 	settings->setDefault("enable_mapgen_debug_info", "false");

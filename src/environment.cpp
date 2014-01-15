@@ -258,7 +258,7 @@ void ActiveBlockList::update(std::list<v3s16> &active_positions,
 	/*
 		Create the new list
 	*/
-	std::set<v3s16> newlist;
+	std::set<v3s16> newlist = m_forceloaded_list;
 	for(std::list<v3s16>::iterator i = active_positions.begin();
 			i != active_positions.end(); ++i)
 	{
@@ -1005,7 +1005,8 @@ void ServerEnvironment::clearAllObjects()
 		}
 		num_blocks_checked++;
 
-		if(num_blocks_checked % report_interval == 0){
+		if(report_interval != 0 &&
+				num_blocks_checked % report_interval == 0){
 			float percent = 100.0 * (float)num_blocks_checked /
 					loadable_blocks.size();
 			infostream<<"ServerEnvironment::clearAllObjects(): "

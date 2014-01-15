@@ -90,13 +90,14 @@ public:
 
 void * ServerThread::Thread()
 {
-	ThreadStarted();
-
 	log_register_thread("ServerThread");
 
 	DSTACK(__FUNCTION_NAME);
-
 	BEGIN_DEBUG_EXCEPTION_HANDLER
+
+	m_server->AsyncRunStep(true);
+
+	ThreadStarted();
 
 	while(!StopRequested())
 	{
@@ -675,6 +676,7 @@ Server::Server(
 	m_savemap_timer = 0.0;
 
 	m_step_dtime = 0.0;
+	m_lag = g_settings->getFloat("dedicated_server_step");
 
 	if(path_world == "")
 		throw ServerError("Supplied empty world path");
@@ -703,6 +705,10 @@ Server::Server(
 	// Create emerge manager
 	m_emerge = new EmergeManager(this);
 
+	// Create world if it doesn't exist
+	if(!initializeWorld(m_path_world, m_gamespec.id))
+		throw ServerError("Failed to initialize world");
+
 	// Create ban manager
 	std::string ban_path = m_path_world+DIR_DELIM+"ipban.txt";
 	m_banmanager = new BanManager(ban_path);
@@ -710,10 +716,6 @@ Server::Server(
 	// Create rollback manager
 	std::string rollback_path = m_path_world+DIR_DELIM+"rollback.txt";
 	m_rollback = createRollbackManager(rollback_path, this);
-
-	// Create world if it doesn't exist
-	if(!initializeWorld(m_path_world, m_gamespec.id))
-		throw ServerError("Failed to initialize world");
 
 	ModConfiguration modconf(m_path_world);
 	m_mods = modconf.getMods();
@@ -1017,7 +1019,7 @@ void Server::step(float dtime)
 	}
 }
 
-void Server::AsyncRunStep()
+void Server::AsyncRunStep(bool initial_step)
 {
 	DSTACK(__FUNCTION_NAME);
 
@@ -1034,7 +1036,7 @@ void Server::AsyncRunStep()
 		SendBlocks(dtime);
 	}
 
-	if(dtime < 0.001)
+	if((dtime < 0.001) && (initial_step == false))
 		return;
 
 	g_profiler->add("Server::AsyncRunStep with dtime (num)", 1);
@@ -1260,13 +1262,14 @@ void Server::AsyncRunStep()
 	}
 
 
+	m_lag += (m_lag > dtime ? -1 : 1) * dtime/100;
 #if USE_CURL
 	// send masterserver announce
 	{
 		float &counter = m_masterserver_timer;
 		if(!isSingleplayer() && (!counter || counter >= 300.0) && g_settings->getBool("server_announce") == true)
 		{
-			ServerList::sendAnnounce(!counter ? "start" : "update", m_clients_names, m_uptime.get(), m_env->getGameTime(), m_gamespec.id, m_mods);
+			ServerList::sendAnnounce(!counter ? "start" : "update", m_clients_names, m_uptime.get(), m_env->getGameTime(), m_lag, m_gamespec.id, m_mods);
 			counter = 0.01;
 		}
 		counter += dtime;
@@ -1526,7 +1529,7 @@ void Server::AsyncRunStep()
 				memcpy((char*)&reply[2], unreliable_data.c_str(),
 						unreliable_data.size());
 				// Send as unreliable
-				m_con.Send(client->peer_id, 0, reply, false);
+				m_con.Send(client->peer_id, 1, reply, false);
 			}
 
 			/*if(reliable_data.size() > 0 || unreliable_data.size() > 0)
@@ -2298,9 +2301,8 @@ void Server::ProcessData(u8 *data, u32 datasize, u16 peer_id)
 		}
 
 		/*infostream<<"Server::ProcessData(): Moved player "<<peer_id<<" to "
-															<<"("<<position.X<<","<<position.Y<<","<<position.Z<<")"
-															<<" pitch="<<pitch<<" yaw="<<yaw<<std::endl;*/
-
+				<<"("<<position.X<<","<<position.Y<<","<<position.Z<<")"
+				<<" pitch="<<pitch<<" yaw="<<yaw<<std::endl;*/
 	}
 	else if(command == TOSERVER_GOTBLOCKS)
 	{
@@ -3571,7 +3573,7 @@ void Server::SendShowFormspecMessage(u16 peer_id, const std::string formspec,
 // Spawns a particle on peer with peer_id
 void Server::SendSpawnParticle(u16 peer_id, v3f pos, v3f velocity, v3f acceleration,
 				float expirationtime, float size, bool collisiondetection,
-				std::string texture)
+				bool vertical, std::string texture)
 {
 	DSTACK(__FUNCTION_NAME);
 
@@ -3584,6 +3586,7 @@ void Server::SendSpawnParticle(u16 peer_id, v3f pos, v3f velocity, v3f accelerat
 	writeF1000(os, size);
 	writeU8(os,  collisiondetection);
 	os<<serializeLongString(texture);
+	writeU8(os, vertical);
 
 	// Make data buffer
 	std::string s = os.str();
@@ -3595,7 +3598,7 @@ void Server::SendSpawnParticle(u16 peer_id, v3f pos, v3f velocity, v3f accelerat
 // Spawns a particle on all peers
 void Server::SendSpawnParticleAll(v3f pos, v3f velocity, v3f acceleration,
 				float expirationtime, float size, bool collisiondetection,
-				std::string texture)
+				bool vertical, std::string texture)
 {
 	for(std::map<u16, RemoteClient*>::iterator
 		i = m_clients.begin();
@@ -3608,14 +3611,14 @@ void Server::SendSpawnParticleAll(v3f pos, v3f velocity, v3f acceleration,
 			continue;
 
 		SendSpawnParticle(client->peer_id, pos, velocity, acceleration,
-			expirationtime, size, collisiondetection, texture);
+			expirationtime, size, collisiondetection, vertical, texture);
 	}
 }
 
 // Adds a ParticleSpawner on peer with peer_id
 void Server::SendAddParticleSpawner(u16 peer_id, u16 amount, float spawntime, v3f minpos, v3f maxpos,
 	v3f minvel, v3f maxvel, v3f minacc, v3f maxacc, float minexptime, float maxexptime,
-	float minsize, float maxsize, bool collisiondetection, std::string texture, u32 id)
+	float minsize, float maxsize, bool collisiondetection, bool vertical, std::string texture, u32 id)
 {
 	DSTACK(__FUNCTION_NAME);
 
@@ -3637,6 +3640,7 @@ void Server::SendAddParticleSpawner(u16 peer_id, u16 amount, float spawntime, v3
 	writeU8(os,  collisiondetection);
 	os<<serializeLongString(texture);
 	writeU32(os, id);
+	writeU8(os, vertical);
 
 	// Make data buffer
 	std::string s = os.str();
@@ -3648,7 +3652,7 @@ void Server::SendAddParticleSpawner(u16 peer_id, u16 amount, float spawntime, v3
 // Adds a ParticleSpawner on all peers
 void Server::SendAddParticleSpawnerAll(u16 amount, float spawntime, v3f minpos, v3f maxpos,
 	v3f minvel, v3f maxvel, v3f minacc, v3f maxacc, float minexptime, float maxexptime,
-	float minsize, float maxsize, bool collisiondetection, std::string texture, u32 id)
+	float minsize, float maxsize, bool collisiondetection, bool vertical, std::string texture, u32 id)
 {
 	for(std::map<u16, RemoteClient*>::iterator
 		i = m_clients.begin();
@@ -3662,7 +3666,7 @@ void Server::SendAddParticleSpawnerAll(u16 amount, float spawntime, v3f minpos, 
 
 		SendAddParticleSpawner(client->peer_id, amount, spawntime,
 			minpos, maxpos, minvel, maxvel, minacc, maxacc,
-			minexptime, maxexptime, minsize, maxsize, collisiondetection, texture, id);
+			minexptime, maxexptime, minsize, maxsize, collisiondetection, vertical, texture, id);
 	}
 }
 
@@ -3720,7 +3724,7 @@ void Server::SendHUDAdd(u16 peer_id, u32 id, HudElement *form)
 	std::string s = os.str();
 	SharedBuffer<u8> data((u8*)s.c_str(), s.size());
 	// Send as reliable
-	m_con.Send(peer_id, 0, data, true);
+	m_con.Send(peer_id, 1, data, true);
 }
 
 void Server::SendHUDRemove(u16 peer_id, u32 id)
@@ -3735,7 +3739,8 @@ void Server::SendHUDRemove(u16 peer_id, u32 id)
 	std::string s = os.str();
 	SharedBuffer<u8> data((u8*)s.c_str(), s.size());
 	// Send as reliable
-	m_con.Send(peer_id, 0, data, true);
+
+	m_con.Send(peer_id, 1, data, true);
 }
 
 void Server::SendHUDChange(u16 peer_id, u32 id, HudElementStat stat, void *value)
@@ -4203,7 +4208,7 @@ void Server::SendBlockNoLock(u16 peer_id, MapBlock *block, u8 ver, u16 net_proto
 	/*
 		Send packet
 	*/
-	m_con.Send(peer_id, 1, reply, true);
+	m_con.Send(peer_id, 2, reply, true);
 }
 
 void Server::SendBlocks(float dtime)
@@ -4565,7 +4570,7 @@ void Server::sendRequestedMedia(u16 peer_id,
 				<<" size=" <<s.size()<<std::endl;
 		SharedBuffer<u8> data((u8*)s.c_str(), s.size());
 		// Send as reliable
-		m_con.Send(peer_id, 0, data, true);
+		m_con.Send(peer_id, 2, data, true);
 	}
 }
 
@@ -5048,21 +5053,21 @@ void Server::notifyPlayers(const std::wstring msg)
 void Server::spawnParticle(const char *playername, v3f pos,
 		v3f velocity, v3f acceleration,
 		float expirationtime, float size, bool
-		collisiondetection, std::string texture)
+		collisiondetection, bool vertical, std::string texture)
 {
 	Player *player = m_env->getPlayer(playername);
 	if(!player)
 		return;
 	SendSpawnParticle(player->peer_id, pos, velocity, acceleration,
-			expirationtime, size, collisiondetection, texture);
+			expirationtime, size, collisiondetection, vertical, texture);
 }
 
 void Server::spawnParticleAll(v3f pos, v3f velocity, v3f acceleration,
 		float expirationtime, float size,
-		bool collisiondetection, std::string texture)
+		bool collisiondetection, bool vertical, std::string texture)
 {
 	SendSpawnParticleAll(pos, velocity, acceleration,
-			expirationtime, size, collisiondetection, texture);
+			expirationtime, size, collisiondetection, vertical, texture);
 }
 
 u32 Server::addParticleSpawner(const char *playername,
@@ -5072,7 +5077,7 @@ u32 Server::addParticleSpawner(const char *playername,
 		v3f minacc, v3f maxacc,
 		float minexptime, float maxexptime,
 		float minsize, float maxsize,
-		bool collisiondetection, std::string texture)
+		bool collisiondetection, bool vertical, std::string texture)
 {
 	Player *player = m_env->getPlayer(playername);
 	if(!player)
@@ -5094,7 +5099,7 @@ u32 Server::addParticleSpawner(const char *playername,
 	SendAddParticleSpawner(player->peer_id, amount, spawntime,
 		minpos, maxpos, minvel, maxvel, minacc, maxacc,
 		minexptime, maxexptime, minsize, maxsize,
-		collisiondetection, texture, id);
+		collisiondetection, vertical, texture, id);
 
 	return id;
 }
@@ -5105,7 +5110,7 @@ u32 Server::addParticleSpawnerAll(u16 amount, float spawntime,
 		v3f minacc, v3f maxacc,
 		float minexptime, float maxexptime,
 		float minsize, float maxsize,
-		bool collisiondetection, std::string texture)
+		bool collisiondetection, bool vertical, std::string texture)
 {
 	u32 id = 0;
 	for(;;) // look for unused particlespawner id
@@ -5123,7 +5128,7 @@ u32 Server::addParticleSpawnerAll(u16 amount, float spawntime,
 	SendAddParticleSpawnerAll(amount, spawntime,
 		minpos, maxpos, minvel, maxvel, minacc, maxacc,
 		minexptime, maxexptime, minsize, maxsize,
-		collisiondetection, texture, id);
+		collisiondetection, vertical, texture, id);
 
 	return id;
 }
@@ -5334,10 +5339,10 @@ v3f findSpawnPos(ServerMap &map)
 				-range + (myrand() % (range * 2)));
 
 		// Get ground height at point
-		s16 groundheight = map.findGroundLevel(nodepos2d, g_settings->getBool("cache_block_before_spawn"));
+		s16 groundheight = map.findGroundLevel(nodepos2d);
 		if (groundheight <= water_level) // Don't go underwater
 			continue;
-		if (groundheight > water_level + g_settings->getS16("max_spawn_height")) // Don't go to high places
+		if (groundheight > water_level + 6) // Don't go to high places
 			continue;
 
 		nodepos = v3s16(nodepos2d.X, groundheight, nodepos2d.Y);
